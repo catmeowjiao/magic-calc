@@ -5,7 +5,6 @@ let waitingForSecondOperand = false;
 
 // Magic variables
 let magicMode = false;
-let equalPressCount = 0;
 let magicClickCount = 0;
 let magicBaseValue = 0;
 
@@ -15,33 +14,36 @@ function updateDisplay() {
 }
 
 function appendNumber(number) {
-    resetEqualSequence(); // Interaction breaks the sequence of =
+    if (magicMode) {
+        // If magic mode is active, input might interfere with count logic?
+        // But clicking number buttons triggers global listener.
+        // Let's just allow normal append unless it violates constraints.
+        // The magic reveal will overwrite this anyway.
+    }
+
     if (waitingForSecondOperand) {
         displayValue = number;
         waitingForSecondOperand = false;
     } else {
-        displayValue = displayValue === '0' ? number : displayValue + number;
+        if (displayValue === '0') {
+            displayValue = number;
+        } else {
+            // Check length constraint (max 5 digits)
+            if (displayValue.length >= 5) {
+                return; // Ignore
+            }
+            displayValue = displayValue + number;
+        }
     }
     updateDisplay();
 }
 
 function appendDecimal() {
-    resetEqualSequence();
-    if (waitingForSecondOperand) {
-        displayValue = '0.';
-        waitingForSecondOperand = false;
-        updateDisplay();
-        return;
-    }
-
-    if (!displayValue.includes('.')) {
-        displayValue += '.';
-        updateDisplay();
-    }
+    // Constraint: No decimals allowed.
+    return;
 }
 
 function handleOperator(nextOperator) {
-    resetEqualSequence();
     const inputValue = parseFloat(displayValue);
 
     if (operator && waitingForSecondOperand) {
@@ -53,6 +55,13 @@ function handleOperator(nextOperator) {
         firstOperand = inputValue;
     } else if (operator) {
         const result = performCalculation(operator, firstOperand, inputValue);
+
+        // Constraint Check
+        if (!isValidResult(result)) {
+            // Ignore operation - do not update firstOperand or displayValue
+            return;
+        }
+
         displayValue = String(result);
         firstOperand = result;
         updateDisplay();
@@ -70,64 +79,94 @@ function performCalculation(op, first, second) {
     return second;
 }
 
+function isValidResult(result) {
+    // Constraints:
+    // 1. Not negative
+    if (result < 0) return false;
+
+    // 2. Not decimal (is integer)
+    if (!Number.isInteger(result)) return false;
+
+    // 3. Not > 5 digits (Max 99999)
+    if (result > 99999) return false;
+
+    return true;
+}
+
 function calculate() {
-    // Standard logic first
     let inputValue = parseFloat(displayValue);
+    let potentialResult = inputValue;
 
     if (operator && firstOperand !== null) {
-        const result = performCalculation(operator, firstOperand, inputValue);
-        displayValue = String(result);
-        firstOperand = result;
-        operator = null;
-        waitingForSecondOperand = false;
-        updateDisplay();
+        potentialResult = performCalculation(operator, firstOperand, inputValue);
+
+        if (isValidResult(potentialResult)) {
+            displayValue = String(potentialResult);
+            firstOperand = potentialResult;
+            operator = null;
+            waitingForSecondOperand = false;
+            updateDisplay();
+        } else {
+            // Invalid result. Ignore the calculation?
+            // "Any such operation ignored".
+            // So the display doesn't update.
+            // But what about magic mode?
+            // If the calculation is invalid (e.g. 5 digits + 1),
+            // the display stays at "99999" (first operand? or input?).
+            // If we are waitingForSecondOperand, display is showing second operand.
+            // If we hit '=', and calc is invalid, nothing happens.
+            // The display shows `inputValue`.
+            potentialResult = inputValue;
+        }
     }
 
-    // Magic Trigger Check
-    equalPressCount++;
-    if (equalPressCount === 2) {
+    // Trigger Magic Mode Check
+    // "Change to click equal once".
+    // So ANY click on equal triggers magic mode?
+    // "Once screen be pressed... 7 times... automatically change... to p - result".
+    // Does it matter if the calculation was valid?
+    // Probably yes, usually magic tricks rely on a valid looking state.
+    // If user types 99999 + 1 =, nothing happens. They might think it's broken.
+    // But if they type 1+1=, it shows 2. Then taps 7 times.
+    // Let's assume ANY equal press activates it, using whatever is on display as base.
+
+    if (!magicMode) {
         magicMode = true;
-        // The value on screen is the "triggerResult"
         magicBaseValue = parseFloat(displayValue);
-
-        // Reset click count.
-        // We set to -1 because the current click event (on the equal button)
-        // will bubble up to the document listener immediately after this,
-        // incrementing it to 0.
-        magicClickCount = -1;
-
+        magicClickCount = -1; // Current click bubbles to document listener
         console.log("Magic Mode Activated. Base: " + magicBaseValue);
     }
 }
 
 function handleClear() {
-    resetEqualSequence();
     displayValue = '0';
     firstOperand = null;
     operator = null;
     waitingForSecondOperand = false;
+
+    // Reset magic mode?
+    magicMode = false;
+    magicClickCount = 0;
+
     updateDisplay();
 }
 
 function handleNegate() {
-    resetEqualSequence();
-    displayValue = String(parseFloat(displayValue) * -1);
-    updateDisplay();
+    // Constraint: No negatives.
+    return;
 }
 
 function handlePercent() {
-    resetEqualSequence();
-    displayValue = String(parseFloat(displayValue) / 100);
-    updateDisplay();
+    // Constraint: No decimals.
+    return;
 }
 
-function resetEqualSequence() {
-    // Resets the consecutive equal press count.
-    // Does NOT reset magicMode once activated.
-    equalPressCount = 0;
-}
 
 // Magic Logic - Global Click Listener
+// Note: We need to handle the fact that 'calculate' sets magicMode=true
+// and creates a race condition with this listener if not careful.
+// Using a simple flag or counter reset (-1) works.
+
 document.addEventListener('click', () => {
     if (magicMode) {
         magicClickCount++;
@@ -141,9 +180,26 @@ document.addEventListener('click', () => {
 
 function triggerMagicEffect() {
     const p = calculateP();
+
+    // "Magic part except" - allowed to be negative/large/decimal?
+    // P is usually large positive integer. Base is small positive integer (max 5 digits).
+    // Result is large positive integer.
+
     const result = p - magicBaseValue;
+
     displayValue = String(result);
     updateDisplay();
+
+    // Reset magic mode after trigger?
+    // Usually magic tricks end.
+    // Or stay in mode? "Once screen be pressed... 7 times or above".
+    // If we stay, every subsequent click updates P?
+    // "Automatically change...".
+    // Let's keep updating if they keep clicking? Or just once?
+    // Usually once is enough. But the prompt says "7 times OR ABOVE".
+    // So maybe continuous update?
+    // P changes every minute.
+    // Let's just update on every click >= 7.
 }
 
 function calculateP() {
@@ -160,7 +216,6 @@ function calculateP() {
     const hour = String(now.getHours()).padStart(2, '0');
     const minute = String(now.getMinutes()).padStart(2, '0');
 
-    // p is MMDDhhmm
     const pString = `${month}${day}${hour}${minute}`;
     return parseInt(pString, 10);
 }
