@@ -7,6 +7,8 @@ let waitingForSecondOperand = false;
 let magicMode = false;
 let magicClickCount = 0;
 let magicBaseValue = 0;
+let magicReady = false;
+let magicRevealed = false;
 
 function updateDisplay() {
     const display = document.querySelector('.display');
@@ -14,6 +16,11 @@ function updateDisplay() {
 }
 
 function appendNumber(number) {
+    // Reset magic ready state on any number input
+    magicReady = false;
+    // Reset magic revealed state
+    magicRevealed = false;
+
     if (magicMode) {
         // If magic mode is active, input might interfere with count logic?
         // But clicking number buttons triggers global listener.
@@ -39,12 +46,30 @@ function appendNumber(number) {
 }
 
 function appendDecimal() {
+    // Reset magic ready state
+    magicReady = false;
+    magicRevealed = false;
     // Constraint: No decimals allowed.
     return;
 }
 
 function handleOperator(nextOperator) {
     const inputValue = parseFloat(displayValue);
+
+    // Magic Mode Trigger Check: If '=' was pressed (magicReady) and now '+' is pressed
+    if (magicReady && nextOperator === '+') {
+        if (!magicMode) {
+            magicMode = true;
+            magicBaseValue = parseFloat(displayValue);
+            magicClickCount = -1; // Current click bubbles to document listener
+            console.log("Magic Mode Activated. Base: " + magicBaseValue);
+        }
+    }
+    // Any operator press consumes the magic ready state
+    magicReady = false;
+    // Also reset magic revealed state if user continues operation
+    magicRevealed = false;
+
 
     if (operator && waitingForSecondOperand) {
         operator = nextOperator;
@@ -120,22 +145,29 @@ function calculate() {
         }
     }
 
-    // Trigger Magic Mode Check
-    // "Change to click equal once".
-    // So ANY click on equal triggers magic mode?
-    // "Once screen be pressed... 7 times... automatically change... to p - result".
-    // Does it matter if the calculation was valid?
-    // Probably yes, usually magic tricks rely on a valid looking state.
-    // If user types 99999 + 1 =, nothing happens. They might think it's broken.
-    // But if they type 1+1=, it shows 2. Then taps 7 times.
-    // Let's assume ANY equal press activates it, using whatever is on display as base.
+    // Magic Mode Phase 2: Reveal Target
+    if (magicRevealed) {
+        // Current display shows magic number (P - Base)
+        // We want to show Target P (which is MagicNumber + Base)
+        // Or simply recalculate P? The trick is: result + base = P.
+        // Let's use the stored base value.
+        const currentMagicNumber = parseFloat(displayValue);
+        const targetP = currentMagicNumber + magicBaseValue;
 
-    if (!magicMode) {
-        magicMode = true;
-        magicBaseValue = parseFloat(displayValue);
-        magicClickCount = -1; // Current click bubbles to document listener
-        console.log("Magic Mode Activated. Base: " + magicBaseValue);
+        displayValue = String(targetP);
+        updateDisplay();
+
+        // Reset states
+        magicRevealed = false;
+        magicMode = false;
+        magicReady = false;
+        return;
     }
+
+    // Normal calculation finished, set Ready state for potential Magic Mode trigger
+    // "Press = once" -> This is the press.
+    // So if user presses + next, magic mode activates.
+    magicReady = true;
 }
 
 function handleClear() {
@@ -144,19 +176,25 @@ function handleClear() {
     operator = null;
     waitingForSecondOperand = false;
 
-    // Reset magic mode?
+    // Reset all magic states
     magicMode = false;
     magicClickCount = 0;
+    magicReady = false;
+    magicRevealed = false;
 
     updateDisplay();
 }
 
 function handleNegate() {
+    magicReady = false;
+    magicRevealed = false;
     // Constraint: No negatives.
     return;
 }
 
 function handlePercent() {
+    magicReady = false;
+    magicRevealed = false;
     // Constraint: No decimals.
     return;
 }
@@ -189,6 +227,9 @@ function triggerMagicEffect() {
 
     displayValue = String(result);
     updateDisplay();
+
+    // Set revealed state so next '=' press can reveal target
+    magicRevealed = true;
 
     // Reset magic mode after trigger?
     // Usually magic tricks end.
